@@ -184,15 +184,18 @@ describe("room supervisor in the Temporal sandbox", () => {
 
   it.each([false, true])("continues after the fiftieth processed turn with its remaining queue (legacy=%s)", async legacyPatch => {
     const seen: string[] = [], finished: any[] = [];
+    const monitoringMissionIds = ["mission:unrelated-monitor"];
     const activities = {
       checkRoomAgentSupervisorTurn: async () => "RUN",
+      prepareRoomAgentBackgroundContinuation: async () => ({ state: "WAITING" }),
+      settleRoomAgentBackgroundMission: async () => false,
       markRoomAgentMissionStarted: async () => undefined,
       markRoomAgentMissionFinished: async (value: any) => { finished.push(value); },
       finishRoomAgentSupervisorTurn: async (value: any) => { finished.push(value); },
       runCodexAppServerTurn: async (turn: any) => { seen.push(turn.agentRunId); return completed; }
     };
     await withTemporal({ activities, legacyPatch }, async ctx => {
-      const handle = await start(ctx, input({ processedCount: 49,
+      const handle = await start(ctx, input({ processedCount: 49, monitoringMissionIds,
         pending: [item(0, "mission:first"), item(1, "mission:second")] }));
       const original = ctx.client.workflow.getHandle(handle.workflowId, handle.firstExecutionRunId);
       await waitFor(() => finished.length === 2);
@@ -200,9 +203,15 @@ describe("room supervisor in the Temporal sandbox", () => {
       const event = history.events?.find((e: any) => e.workflowExecutionContinuedAsNewEventAttributes);
       expect(event).toBeDefined();
       const carried = roomAgentSupervisorInputSchema.parse(jsonPayload(event!.workflowExecutionContinuedAsNewEventAttributes!.input!.payloads![0]!));
+      expect(carried.roomId).toBe(roomId);
+      expect(carried.monitoringMissionIds).toEqual(monitoringMissionIds);
       expect(carried.pending).toEqual([item(1, "mission:second")]);
       expect(carried.processedCount).toBe(0);
       expect(carried.interrupted).toEqual([]);
+      const resumed = await handle.fetchHistory();
+      const resumedInput = resumed.events?.find((e: any) => e.workflowExecutionStartedEventAttributes)
+        ?.workflowExecutionStartedEventAttributes?.input?.payloads?.[0];
+      expect(roomAgentSupervisorInputSchema.parse(jsonPayload(resumedInput!))).toEqual(carried);
       expect(seen).toEqual([item(0).turn.agentRunId, item(1).turn.agentRunId]);
       expect(history.events?.filter((e: any) => e.childWorkflowExecutionStartedEventAttributes)).toHaveLength(1);
       await handle.terminate();
@@ -294,6 +303,8 @@ describe("room supervisor in the Temporal sandbox", () => {
       expect(event).toBeDefined();
       const carried = roomAgentSupervisorInputSchema.parse(jsonPayload(event!.workflowExecutionContinuedAsNewEventAttributes!.input!.payloads![0]!));
       expect(carried.pending).toHaveLength(100);
+      expect(history.events?.filter((e: any) =>
+        e.activityTaskScheduledEventAttributes?.activityType?.name === "checkRoomAgentSupervisorTurn")).toHaveLength(6);
       expect(new Set(checked).size).toBe(106);
       expect(checked).toEqual(Array.from({ length: 106 }, (_, index) => item(index).turn.agentRunId));
       await handle.terminate();
@@ -404,7 +415,7 @@ describe("room supervisor in the Temporal sandbox", () => {
       // Let the test server advance through the actual timers and activity
       // completions, rather than issuing 250 wall-clock polling RPCs.
       await ctx.env.sleep("5 minutes");
-      await waitFor(() => polls >= 250, "250 monitoring activity calls");
+      await waitFor(() => polls >= 251, "monitoring continues in the next execution");
       await until(async () => Boolean((await original.fetchHistory()).events?.some((e: any) => e.workflowExecutionContinuedAsNewEventAttributes)), "250-poll continue-as-new");
       const history = await original.fetchHistory();
       const events = history.events ?? [];
@@ -417,6 +428,10 @@ describe("room supervisor in the Temporal sandbox", () => {
       const event = events.find((e: any) => e.workflowExecutionContinuedAsNewEventAttributes)!;
       const carried = roomAgentSupervisorInputSchema.parse(jsonPayload(event.workflowExecutionContinuedAsNewEventAttributes!.input!.payloads![0]!));
       expect(carried).toMatchObject({ roomId, pending: [], monitoringMissionIds: ["mission:monitor"], processedCount: legacyPatch ? 7 : 0 });
+      const resumed = await handle.fetchHistory();
+      const resumedInput = resumed.events?.find((e: any) => e.workflowExecutionStartedEventAttributes)
+        ?.workflowExecutionStartedEventAttributes?.input?.payloads?.[0];
+      expect(roomAgentSupervisorInputSchema.parse(jsonPayload(resumedInput!))).toEqual(carried);
       await handle.terminate();
     });
   }, 120_000);
