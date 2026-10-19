@@ -57,9 +57,16 @@ for (const legacyPatch of [false, true]) {
       args: [{ roomId: "room:fixture", monitoringMissionIds: ["mission:fixture"] }]
     });
     // Wait for the first durable polling timer before advancing the test clock.
+    let pollingTimerObserved = false;
     for (let attempts = 0; attempts < 200; attempts++) {
-      if ((await handle.fetchHistory()).events?.some(e => e.timerStartedEventAttributes)) break;
+      if ((await handle.fetchHistory()).events?.some(e => e.timerStartedEventAttributes)) {
+        pollingTimerObserved = true;
+        break;
+      }
       await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    if (!pollingTimerObserved) {
+      throw new Error(`Supervisor ${suffix} did not schedule its initial polling timer after 200 history checks`);
     }
     await env.sleep("1 second");
     await waitFor(() => observed === 1, "supervisor fixture polling");

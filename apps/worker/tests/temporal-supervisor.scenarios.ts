@@ -186,7 +186,7 @@ describe("room supervisor in the Temporal sandbox", () => {
     const seen: string[] = [], finished: any[] = [];
     const monitoringMissionIds = ["mission:unrelated-monitor"];
     const activities = {
-      checkRoomAgentSupervisorTurn: async () => "RUN",
+      checkRoomAgentSupervisorTurn: async () => "READY",
       prepareRoomAgentBackgroundContinuation: async () => ({ state: "WAITING" }),
       settleRoomAgentBackgroundMission: async () => false,
       markRoomAgentMissionStarted: async () => undefined,
@@ -314,7 +314,7 @@ describe("room supervisor in the Temporal sandbox", () => {
   it.each([false, true])("validates enqueue signals, deduplicates pending work and interrupts active and queued turns (legacy=%s)", async legacyPatch => {
     const running: string[] = [], finished: any[] = [], discarded: any[] = [];
     const activities = {
-      checkRoomAgentSupervisorTurn: async () => "RUN",
+      checkRoomAgentSupervisorTurn: async () => "READY",
       markRoomAgentMissionStarted: async () => undefined,
       markRoomAgentMissionFinished: async (value: any) => { finished.push(value); },
       markRoomAgentMissionContinued: async () => undefined,
@@ -356,7 +356,7 @@ describe("room supervisor in the Temporal sandbox", () => {
     const activities = {
       checkRoomAgentSupervisorTurn: async (value: any) => {
         checked.push(value);
-        return checked.length === 1 ? "PAUSED" : "RUN";
+        return checked.length === 1 ? "PAUSED" : "READY";
       },
       runCodexAppServerTurn: async (turn: any) => { executed.push(turn); return completed; },
       finishRoomAgentSupervisorTurn: async (value: any) => { finished.push(value); }
