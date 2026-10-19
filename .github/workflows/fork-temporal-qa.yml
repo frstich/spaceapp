@@ -61,6 +61,9 @@ jobs:
       - name: Run the complete worker suite independently of timing result
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: npm test -w @space/worker
+      - name: Run the complete root public suite
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: npm test
       - name: Build complete candidate
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: npm run build
