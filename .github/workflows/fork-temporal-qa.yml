@@ -1,0 +1,66 @@
+name: Manual Temporal candidate QA
+
+# Fork-only infrastructure. Exclude this file from the upstream bounty patch.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact 40-character commit SHA in this fork to test
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  temporal-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Validate exact candidate reference
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: '[[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
+      - name: Install public-suite command dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep ffmpeg
+      - name: Typecheck and build internal dependencies
+        id: setup
+        run: npm run check
+      - name: Measure added Temporal tests including cold bundle compilation
+        id: benchmark
+        shell: bash
+        run: |
+          echo "Candidate: $(git rev-parse HEAD)"
+          node --version
+          npm --version
+          start=$(date +%s)
+          set +e
+          npm test -w @space/worker -- tests/temporal-workflows.test.ts --reporter verbose
+          status=$?
+          set -e
+          elapsed=$(( $(date +%s) - start ))
+          echo "Added Temporal suite wall time: ${elapsed}s; exit status: ${status}"
+          {
+            echo "Independent fork QA for $(git rev-parse HEAD)"
+            echo "Added suite: ${elapsed}s including bundle compilation, excluding install/typecheck setup."
+            echo "Test exit status: ${status}. Required runtime: strictly below 180s."
+            echo "This is not full CI, provenance verification, or personal human-review attestation."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if (( status != 0 )); then exit "$status"; fi
+          (( elapsed < 180 ))
+      - name: Run the complete worker suite independently of timing result
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: npm test -w @space/worker
+      - name: Build complete candidate
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: npm run build
